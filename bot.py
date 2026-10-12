@@ -1,13 +1,19 @@
 """
-Простой бот: постит сообщения в Telegram-канал через случайный
+Бот: постит видео + текст в Telegram-канал через случайный
 интервал времени (в заданном диапазоне минут).
 
+Поддерживает шаблоны с рандомизацией:
+  В messages.txt можно писать:
+  {Привет|Здарова|Йо}, смотри видео!
+  Бот сам выберет один вариант из каждой группы.
+
 Настройка — через переменные окружения (см. .env.example):
-  BOT_TOKEN        — токен бота от @BotFather
+  BOT_TOKEN         — токен бота от @BotFather
   CHANNEL_ID        — id канала (например -1001234567890) или @username канала
-  MESSAGES_FILE     — путь к файлу messages.txt со списком сообщений (по умолчанию messages.txt)
-  MIN_INTERVAL_MIN  — минимальный интервал между постами, в минутах
-  MAX_INTERVAL_MIN  — максимальный интервал между постами, в минутах
+  MESSAGES_FILE     — путь к файлу messages.txt (по умолчанию messages.txt)
+  VIDEO_FILE        — путь к видеофайлу (по умолчанию video.mp4)
+  MIN_INTERVAL_MIN  — минимальный интервал между постами, в минутах (по умолчанию 30)
+  MAX_INTERVAL_MIN  — максимальный интервал между постами, в минутах (по умолчанию 60)
   SEND_ON_START     — "1", чтобы отправить первое сообщение сразу при старте (по умолчанию "0")
 """
 
@@ -15,9 +21,11 @@ import asyncio
 import logging
 import os
 import random
+import re
 from pathlib import Path
 
 from aiogram import Bot
+from aiogram.types import FSInputFile
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,14 +39,10 @@ def load_messages(path: str) -> list[str]:
     if not file_path.exists():
         raise FileNotFoundError(
             f"Файл с сообщениями не найден: {path}. "
-            "Создай messages.txt и впиши туда текст(ы) сообщений, "
-            "каждое сообщение — на отдельной строке. "
-            "Если нужны переносы строк внутри одного сообщения, "
-            "раздели сообщения строкой, состоящей только из '---'."
+            "Создай messages.txt и впиши туда текст(ы) сообщений."
         )
     raw = file_path.read_text(encoding="utf-8")
-    # Сообщения разделяются строкой '---' (на отдельной строке),
-    # это позволяет иметь многострочные сообщения.
+    # Сообщения разделяются строкой '---' (на отдельной строке)
     parts = [p.strip() for p in raw.split("\n---\n")]
     messages = [p for p in parts if p]
     if not messages:
@@ -46,19 +50,34 @@ def load_messages(path: str) -> list[str]:
     return messages
 
 
+def render_template(template: str) -> str:
+    """
+    Заменяет все {вариант1|вариант2|вариант3} на случайный вариант.
+    Можно использовать несколько таких групп в одном шаблоне.
+    """
+    def replace_group(match: re.Match) -> str:
+        options = [opt.strip() for opt in match.group(1).split("|") if opt.strip()]
+        if not options:
+            return ""
+        return random.choice(options)
+
+    # Ищем все конструкции вида {a|b|c}
+    return re.sub(r"\{([^{}]+)\}", replace_group, template)
+
+
 async def main() -> None:
     bot_token = os.environ["BOT_TOKEN"]
     channel_id_raw = os.environ["CHANNEL_ID"]
-    # channel_id может быть числом (-100...) или @username
     channel_id: int | str = channel_id_raw
     try:
         channel_id = int(channel_id_raw)
     except ValueError:
-        pass  # оставляем как строку, например "@mychannel"
+        pass
 
     messages_file = os.environ.get("MESSAGES_FILE", "messages.txt")
+    video_file = os.environ.get("VIDEO_FILE", "video.mp4")
     min_interval = int(os.environ.get("MIN_INTERVAL_MIN", "30"))
-    max_interval = int(os.environ.get("MAX_INTERVAL_MIN", "90"))
+    max_interval = int(os.environ.get("MAX_INTERVAL_MIN", "60"))
     send_on_start = os.environ.get("SEND_ON_START", "0") == "1"
 
     if min_interval <= 0 or max_interval <= 0 or min_interval > max_interval:
@@ -67,14 +86,21 @@ async def main() -> None:
             f"MAX_INTERVAL_MIN={max_interval}"
         )
 
+    video_path = Path(video_file)
+    if not video_path.exists():
+        raise FileNotFoundError(
+            f"Видеофайл не найден: {video_file}. "
+            "Положи файл video.mp4 в папку проекта (или укажи другой путь в VIDEO_FILE)."
+        )
+
     messages = load_messages(messages_file)
-    log.info("Загружено сообщений: %d", len(messages))
+    log.info("Загружено шаблонов: %d", len(messages))
+    log.info("Видео: %s", video_file)
     log.info("Интервал между постами: %d–%d мин", min_interval, max_interval)
 
     bot = Bot(token=bot_token)
 
     try:
-        # Проверим, что токен рабочий и бот видит себя
         me = await bot.get_me()
         log.info("Бот запущен: @%s", me.username)
 
@@ -84,10 +110,17 @@ async def main() -> None:
             await asyncio.sleep(first_delay * 60)
 
         while True:
-            text = random.choice(messages)
+            template = random.choice(messages)
+            text = render_template(template)
+
             try:
-                await bot.send_message(chat_id=channel_id, text=text)
-                log.info("Сообщение отправлено (%d симв.)", len(text))
+                video = FSInputFile(video_path)
+                await bot.send_video(
+                    chat_id=channel_id,
+                    video=video,
+                    caption=text,
+                )
+                log.info("Видео + текст отправлены: %s", text[:80].replace("\n", " "))
             except Exception as e:
                 log.error("Ошибка при отправке: %s", e)
 
