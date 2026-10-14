@@ -7,14 +7,7 @@
   {Привет|Здарова|Йо}, смотри видео!
   Бот сам выберет один вариант из каждой группы.
 
-Настройка — через переменные окружения (см. .env.example):
-  BOT_TOKEN         — токен бота от @BotFather
-  CHANNEL_ID        — id канала (например -1001234567890) или @username канала
-  MESSAGES_FILE     — путь к файлу messages.txt (по умолчанию messages.txt)
-  VIDEO_FILE        — путь к видеофайлу (по умолчанию video.mp4)
-  MIN_INTERVAL_MIN  — минимальный интервал между постами, в минутах (по умолчанию 30)
-  MAX_INTERVAL_MIN  — максимальный интервал между постами, в минутах (по умолчанию 60)
-  SEND_ON_START     — "1", чтобы отправить первое сообщение сразу при старте (по умолчанию "0")
+Также поддерживает один кастомный (премиум) эмодзи в начале сообщения.
 """
 
 import asyncio
@@ -25,13 +18,16 @@ import re
 from pathlib import Path
 
 from aiogram import Bot
-from aiogram.types import FSInputFile
+from aiogram.types import FSInputFile, MessageEntity
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 log = logging.getLogger("channel_poster")
+
+# ID премиум-эмодзи
+CUSTOM_EMOJI_ID = "5348404473129614535"
 
 
 def load_messages(path: str) -> list[str]:
@@ -42,7 +38,6 @@ def load_messages(path: str) -> list[str]:
             "Создай messages.txt и впиши туда текст(ы) сообщений."
         )
     raw = file_path.read_text(encoding="utf-8")
-    # Сообщения разделяются строкой '---' (на отдельной строке)
     parts = [p.strip() for p in raw.split("\n---\n")]
     messages = [p for p in parts if p]
     if not messages:
@@ -51,17 +46,13 @@ def load_messages(path: str) -> list[str]:
 
 
 def render_template(template: str) -> str:
-    """
-    Заменяет все {вариант1|вариант2|вариант3} на случайный вариант.
-    Можно использовать несколько таких групп в одном шаблоне.
-    """
+    """Заменяет все {вариант1|вариант2|вариант3} на случайный вариант."""
     def replace_group(match: re.Match) -> str:
         options = [opt.strip() for opt in match.group(1).split("|") if opt.strip()]
         if not options:
             return ""
         return random.choice(options)
 
-    # Ищем все конструкции вида {a|b|c}
     return re.sub(r"\{([^{}]+)\}", replace_group, template)
 
 
@@ -90,7 +81,7 @@ async def main() -> None:
     if not video_path.exists():
         raise FileNotFoundError(
             f"Видеофайл не найден: {video_file}. "
-            "Положи файл video.mp4 в папку проекта (или укажи другой путь в VIDEO_FILE)."
+            "Положи файл video.mp4 в папку проекта."
         )
 
     messages = load_messages(messages_file)
@@ -113,12 +104,27 @@ async def main() -> None:
             template = random.choice(messages)
             text = render_template(template)
 
+            # Placeholder для кастомного эмодзи в начале (обычный эмодзи + пробел)
+            caption = "🔥 " + text
+
+            # Entity: заменяем placeholder на кастомный эмодзи
+            # "🔥 " в UTF-16 занимает 2 единицы длины
+            entities = [
+                MessageEntity(
+                    type="custom_emoji",
+                    offset=0,
+                    length=2,
+                    custom_emoji_id=CUSTOM_EMOJI_ID,
+                )
+            ]
+
             try:
                 video = FSInputFile(video_path)
                 await bot.send_video(
                     chat_id=channel_id,
                     video=video,
-                    caption=text,
+                    caption=caption,
+                    caption_entities=entities,
                 )
                 log.info("Видео + текст отправлены: %s", text[:80].replace("\n", " "))
             except Exception as e:
