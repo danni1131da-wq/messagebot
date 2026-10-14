@@ -2,12 +2,7 @@
 Бот: постит видео + текст в Telegram-канал через случайный
 интервал времени (в заданном диапазоне минут).
 
-Поддерживает шаблоны с рандомизацией:
-  В messages.txt можно писать:
-  {Привет|Здарова|Йо}, смотри видео!
-  Бот сам выберет один вариант из каждой группы.
-
-Также поддерживает один кастомный (премиум) эмодзи в начале сообщения.
+Поддерживает шаблоны с рандомизацией + премиум-эмодзи через HTML <tg-emoji>.
 """
 
 import asyncio
@@ -18,7 +13,8 @@ import re
 from pathlib import Path
 
 from aiogram import Bot
-from aiogram.types import FSInputFile, MessageEntity
+from aiogram.types import FSInputFile
+from aiogram.enums import ParseMode
 
 logging.basicConfig(
     level=logging.INFO,
@@ -104,19 +100,8 @@ async def main() -> None:
             template = random.choice(messages)
             text = render_template(template)
 
-            # Placeholder для кастомного эмодзи в начале (обычный эмодзи + пробел)
-            caption = "🔥 " + text
-
-            # Entity: заменяем placeholder на кастомный эмодзи
-            # "🔥 " в UTF-16 занимает 2 единицы длины
-            entities = [
-                MessageEntity(
-                    type="custom_emoji",
-                    offset=0,
-                    length=2,
-                    custom_emoji_id=CUSTOM_EMOJI_ID,
-                )
-            ]
+            # Премиум-эмодзи через HTML-тег <tg-emoji>
+            caption = f"<tg-emoji emoji-id='{CUSTOM_EMOJI_ID}'>⭐</tg-emoji> {text}"
 
             try:
                 video = FSInputFile(video_path)
@@ -124,7 +109,7 @@ async def main() -> None:
                     chat_id=channel_id,
                     video=video,
                     caption=caption,
-                    caption_entities=entities,
+                    parse_mode=ParseMode.HTML,
                 )
                 log.info("Видео + текст отправлены: %s", text[:80].replace("\n", " "))
             except Exception as e:
