@@ -2,7 +2,10 @@
 Бот: постит видео + текст в Telegram-канал через случайный
 интервал времени (в заданном диапазоне минут).
 
-Поддерживает шаблоны с рандомизацией + премиум-эмодзи через HTML <tg-emoji>.
+Поддерживает шаблоны с рандомизацией:
+  В messages.txt можно писать:
+  {Привет|Здарова|Йо}, смотри видео!
+  Бот сам выберет один вариант из каждой группы.
 """
 
 import asyncio
@@ -14,16 +17,12 @@ from pathlib import Path
 
 from aiogram import Bot
 from aiogram.types import FSInputFile
-from aiogram.enums import ParseMode
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 log = logging.getLogger("channel_poster")
-
-# ID премиум-эмодзи
-CUSTOM_EMOJI_ID = "5348404473129614535"
 
 
 def load_messages(path: str) -> list[str]:
@@ -100,16 +99,12 @@ async def main() -> None:
             template = random.choice(messages)
             text = render_template(template)
 
-            # Премиум-эмодзи через HTML-тег <tg-emoji>
-            caption = f"<tg-emoji emoji-id='{CUSTOM_EMOJI_ID}'>⭐</tg-emoji> {text}"
-
             try:
                 video = FSInputFile(video_path)
                 await bot.send_video(
                     chat_id=channel_id,
                     video=video,
-                    caption=caption,
-                    parse_mode=ParseMode.HTML,
+                    caption=text,
                 )
                 log.info("Видео + текст отправлены: %s", text[:80].replace("\n", " "))
             except Exception as e:
